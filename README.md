@@ -12,6 +12,15 @@ Windows版Rust用セルフアップデートのリファレンス実装。
 
 シンプルな実装を優先しています。
 
+## 予定
+- 以下をライブラリクレートに実装予定です：
+  - hash
+  - check
+  - auto-update
+  - back-ground-check
+  - force-update（back-ground-checkで更新検知時）
+  - アプリ終了時notice（back-ground-checkで更新検知時）
+
 ## install
 
 ```
