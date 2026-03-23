@@ -84,7 +84,7 @@ if sys.platform == 'win32':
 else:
     popen_kwargs = {{}}
 
-subprocess.run({install_parts}, check=True)
+subprocess.run({install_parts}, check=True, **popen_kwargs)
 
 {launch_stmts}
 try:
@@ -159,6 +159,8 @@ mod tests {
         assert!(script.contains("'stdin': subprocess.DEVNULL"));
         assert!(script.contains("'stdout': subprocess.DEVNULL"));
         assert!(script.contains("'stderr': subprocess.DEVNULL"));
+        assert!(script.contains("subprocess.run("));
+        assert!(script.contains("check=True, **popen_kwargs"));
     }
 
     #[test]
