@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "cat-self-update-lib",
+    "cat-self-update-app",
+]
+resolver = "2"

@@ -1,0 +1,12 @@
+[package]
+name = "cat-self-update-app"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "cat-self-update"
+path = "src/main.rs"
+
+[dependencies]
+cat-self-update-lib = { path = "../cat-self-update-lib" }
+clap = { version = "4", features = ["derive"] }
