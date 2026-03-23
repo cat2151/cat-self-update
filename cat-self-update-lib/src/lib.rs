@@ -3,6 +3,9 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(windows)]
+use std::process::Stdio;
+
 /// Initiates a self-update by generating a Python helper script in the system
 /// temp directory and launching it asynchronously (detached from the current
 /// process).
@@ -72,7 +75,12 @@ import sys
 
 if sys.platform == 'win32':
     DETACHED_PROCESS = 0x00000008
-    popen_kwargs = {{'creationflags': DETACHED_PROCESS}}
+    popen_kwargs = {{
+        'creationflags': DETACHED_PROCESS,
+        'stdin': subprocess.DEVNULL,
+        'stdout': subprocess.DEVNULL,
+        'stderr': subprocess.DEVNULL,
+    }}
 else:
     popen_kwargs = {{}}
 
@@ -111,6 +119,9 @@ fn spawn_python(py_path: &std::path::Path) -> Result<(), Box<dyn std::error::Err
         const DETACHED_PROCESS: u32 = 0x0000_0008;
         Command::new("python")
             .arg(py_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .creation_flags(DETACHED_PROCESS)
             .spawn()?;
     }
@@ -140,6 +151,14 @@ mod tests {
         assert!(script.contains("install"));
         assert!(script.contains("--force"));
         assert!(script.contains("--git"));
+    }
+
+    #[test]
+    fn py_script_redirects_windows_stdio_to_devnull() {
+        let script = generate_py_script("cat2151", "cat-self-update", &[]);
+        assert!(script.contains("'stdin': subprocess.DEVNULL"));
+        assert!(script.contains("'stdout': subprocess.DEVNULL"));
+        assert!(script.contains("'stderr': subprocess.DEVNULL"));
     }
 
     #[test]
