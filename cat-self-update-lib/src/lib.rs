@@ -27,23 +27,41 @@ pub fn self_update(
     Ok(())
 }
 
+/// Escape a string so it can be safely embedded inside a single-quoted
+/// Python string literal. Escapes backslashes and single quotes.
+fn escape_py_single_quoted(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '\'' => out.push_str("\\'"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 /// Build the Python script that will be written to a temp file.
 fn generate_py_script(owner: &str, repo: &str, bins: &[&str]) -> String {
     let repo_url = format!("https://github.com/{}/{}", owner, repo);
+    let repo_url_escaped = escape_py_single_quoted(&repo_url);
 
     // Build the cargo install command as a Python list literal.
     let install_parts = format!(
         "['cargo', 'install', '--force', '--git', '{}']",
-        repo_url
+        repo_url_escaped
     );
 
     // Determine which binary (or binaries) to launch after install.
     let launch_stmts: String = if bins.is_empty() {
-        // Default: launch the binary that matches the repository name.
-        format!("subprocess.Popen(['{}'], **popen_kwargs)\n", repo)
+        let repo_escaped = escape_py_single_quoted(repo);
+        format!("subprocess.Popen(['{}'], **popen_kwargs)\n", repo_escaped)
     } else {
         bins.iter()
-            .map(|b| format!("subprocess.Popen(['{}'], **popen_kwargs)\n", b))
+            .map(|b| {
+                let b_escaped = escape_py_single_quoted(b);
+                format!("subprocess.Popen(['{}'], **popen_kwargs)\n", b_escaped)
+            })
             .collect()
     };
 
@@ -61,7 +79,10 @@ else:
 subprocess.run({install_parts}, check=True)
 
 {launch_stmts}
-os.remove(__file__)
+try:
+    os.remove(__file__)
+except OSError:
+    pass
 "#,
         install_parts = install_parts,
         launch_stmts = launch_stmts,
@@ -72,11 +93,11 @@ os.remove(__file__)
 /// process invocation.
 fn unique_tmp_path() -> PathBuf {
     let pid = std::process::id();
-    let nanos = SystemTime::now()
+    let timestamp_nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
-        .subsec_nanos();
-    let filename = format!("cat_self_update_{}_{}.py", pid, nanos);
+        .as_nanos();
+    let filename = format!("cat_self_update_{}_{}.py", pid, timestamp_nanos);
     std::env::temp_dir().join(filename)
 }
 
@@ -138,6 +159,16 @@ mod tests {
     fn py_script_removes_itself() {
         let script = generate_py_script("cat2151", "cat-self-update", &[]);
         assert!(script.contains("os.remove(__file__)"));
+        assert!(script.contains("except OSError"));
+    }
+
+    #[test]
+    fn py_script_escapes_single_quotes() {
+        let script = generate_py_script("o\\'wner", "re\\'po", &["bi\\'n"]);
+        assert!(!script.contains("o\\'wner") || script.contains("o\\\\'wner"));
+        // Ensure the escape helper works directly
+        assert_eq!(escape_py_single_quoted("a'b"), "a\\'b");
+        assert_eq!(escape_py_single_quoted("a\\b"), "a\\\\b");
     }
 
     #[test]
