@@ -1,0 +1,187 @@
+use std::fs;
+use std::path::PathBuf;
+use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Initiates a self-update by generating a Python helper script in the system
+/// temp directory and launching it asynchronously (detached from the current
+/// process).
+///
+/// # Arguments
+/// * `owner` – GitHub repository owner (e.g. `"cat2151"`)
+/// * `repo`  – GitHub repository name (e.g. `"cat-self-update"`)
+/// * `bins`  – additional binary names to launch after installation; when
+///   empty the repository name itself is used as the binary name
+pub fn self_update(
+    owner: &str,
+    repo: &str,
+    bins: &[&str],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let py_content = generate_py_script(owner, repo, bins);
+    let py_path = unique_tmp_path();
+
+    fs::write(&py_path, &py_content)?;
+
+    spawn_python(&py_path)?;
+
+    Ok(())
+}
+
+/// Escape a string so it can be safely embedded inside a single-quoted
+/// Python string literal. Escapes backslashes and single quotes.
+fn escape_py_single_quoted(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '\'' => out.push_str("\\'"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+/// Build the Python script that will be written to a temp file.
+fn generate_py_script(owner: &str, repo: &str, bins: &[&str]) -> String {
+    let repo_url = format!("https://github.com/{}/{}", owner, repo);
+    let repo_url_escaped = escape_py_single_quoted(&repo_url);
+
+    // Build the cargo install command as a Python list literal.
+    let install_parts = format!(
+        "['cargo', 'install', '--force', '--git', '{}']",
+        repo_url_escaped
+    );
+
+    // Determine which binary (or binaries) to launch after install.
+    let launch_stmts: String = if bins.is_empty() {
+        let repo_escaped = escape_py_single_quoted(repo);
+        format!("subprocess.Popen(['{}'], **popen_kwargs)\n", repo_escaped)
+    } else {
+        bins.iter()
+            .map(|b| {
+                let b_escaped = escape_py_single_quoted(b);
+                format!("subprocess.Popen(['{}'], **popen_kwargs)\n", b_escaped)
+            })
+            .collect()
+    };
+
+    format!(
+        r#"import subprocess
+import os
+import sys
+
+if sys.platform == 'win32':
+    DETACHED_PROCESS = 0x00000008
+    popen_kwargs = {{'creationflags': DETACHED_PROCESS}}
+else:
+    popen_kwargs = {{}}
+
+subprocess.run({install_parts}, check=True)
+
+{launch_stmts}
+try:
+    os.remove(__file__)
+except OSError:
+    pass
+"#,
+        install_parts = install_parts,
+        launch_stmts = launch_stmts,
+    )
+}
+
+/// Return a path inside the system temp directory that is unique for this
+/// process invocation.
+fn unique_tmp_path() -> PathBuf {
+    let pid = std::process::id();
+    let timestamp_nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let filename = format!("cat_self_update_{}_{}.py", pid, timestamp_nanos);
+    std::env::temp_dir().join(filename)
+}
+
+/// Spawn the Python interpreter with the given script path.
+/// On Windows the process is started as DETACHED_PROCESS so it outlives the
+/// parent executable.
+fn spawn_python(py_path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        Command::new("python")
+            .arg(py_path)
+            .creation_flags(DETACHED_PROCESS)
+            .spawn()?;
+    }
+
+    #[cfg(not(windows))]
+    {
+        Command::new("python3").arg(py_path).spawn()?;
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn py_script_contains_repo_url() {
+        let script = generate_py_script("cat2151", "cat-self-update", &[]);
+        assert!(script.contains("https://github.com/cat2151/cat-self-update"));
+    }
+
+    #[test]
+    fn py_script_contains_cargo_install() {
+        let script = generate_py_script("cat2151", "cat-self-update", &[]);
+        assert!(script.contains("cargo"));
+        assert!(script.contains("install"));
+        assert!(script.contains("--force"));
+        assert!(script.contains("--git"));
+    }
+
+    #[test]
+    fn py_script_launches_repo_binary_when_bins_empty() {
+        let script = generate_py_script("cat2151", "cat-self-update", &[]);
+        assert!(script.contains("'cat-self-update'"));
+    }
+
+    #[test]
+    fn py_script_launches_specified_bins() {
+        let script = generate_py_script("owner", "repo", &["my-bin", "other-bin"]);
+        assert!(script.contains("'my-bin'"));
+        assert!(script.contains("'other-bin'"));
+    }
+
+    #[test]
+    fn py_script_removes_itself() {
+        let script = generate_py_script("cat2151", "cat-self-update", &[]);
+        assert!(script.contains("os.remove(__file__)"));
+        assert!(script.contains("except OSError"));
+    }
+
+    #[test]
+    fn py_script_escapes_single_quotes() {
+        let script = generate_py_script("o\\'wner", "re\\'po", &["bi\\'n"]);
+        assert!(!script.contains("o\\'wner") || script.contains("o\\\\'wner"));
+        // Ensure the escape helper works directly
+        assert_eq!(escape_py_single_quoted("a'b"), "a\\'b");
+        assert_eq!(escape_py_single_quoted("a\\b"), "a\\\\b");
+    }
+
+    #[test]
+    fn unique_tmp_path_is_in_temp_dir() {
+        let path = unique_tmp_path();
+        assert!(path.starts_with(std::env::temp_dir()));
+    }
+
+    #[test]
+    fn unique_tmp_path_has_expected_prefix() {
+        let path = unique_tmp_path();
+        let name = path.file_name().unwrap().to_str().unwrap();
+        assert!(name.starts_with("cat_self_update_"));
+        assert!(name.ends_with(".py"));
+    }
+}
