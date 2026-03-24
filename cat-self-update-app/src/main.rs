@@ -1,6 +1,8 @@
 use cat_self_update_lib::self_update;
 use clap::{Parser, Subcommand};
 
+const BUILD_COMMIT_HASH: &str = env!("BUILD_COMMIT_HASH");
+
 #[derive(Parser)]
 #[command(name = "cat-self-update")]
 #[command(about = "Demo app that self-updates via cargo install")]
@@ -13,6 +15,8 @@ struct Cli {
 enum Commands {
     /// Self-update the application from GitHub
     Update,
+    /// Print the build-time commit hash
+    Hash,
 }
 
 fn main() {
@@ -25,5 +29,6 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Commands::Hash => println!("{}", BUILD_COMMIT_HASH),
     }
 }
