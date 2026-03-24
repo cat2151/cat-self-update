@@ -150,7 +150,7 @@ fn fetch_remote_branch_head(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let repo_url = format!("https://github.com/{owner}/{repo}");
     let ref_name = format!("refs/heads/{branch}");
-    let output = Command::new("git")
+    let output = git_command_without_prompt()
         .args(["ls-remote", repo_url.as_str(), ref_name.as_str()])
         .output()?;
 
@@ -168,6 +168,14 @@ fn fetch_remote_branch_head(
         .map_err(|err| format!("git ls-remote returned invalid UTF-8 output: {err}"))?;
     parse_ls_remote_hash(&stdout, &ref_name)
         .ok_or_else(|| format!("could not find remote hash for {ref_name}").into())
+}
+
+fn git_command_without_prompt() -> Command {
+    let mut command = Command::new("git");
+    command
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", "");
+    command
 }
 
 fn parse_ls_remote_hash(output: &str, ref_name: &str) -> Option<String> {

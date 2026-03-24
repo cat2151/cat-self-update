@@ -1,5 +1,7 @@
 use std::process::Command;
 
+const RUN_NETWORK_TESTS_ENV: &str = "RUN_NETWORK_TESTS";
+
 fn app_bin() -> String {
     std::env::var("CARGO_BIN_EXE_cat-self-update").expect("binary path should be set by cargo test")
 }
@@ -12,7 +14,7 @@ fn workspace_root() -> std::path::PathBuf {
 }
 
 fn remote_main_is_reachable() -> bool {
-    let output = Command::new("git")
+    let output = git_command_without_prompt()
         .args([
             "ls-remote",
             "https://github.com/cat2151/cat-self-update",
@@ -24,6 +26,14 @@ fn remote_main_is_reachable() -> bool {
         Ok(output) => output.status.success(),
         Err(_) => false,
     }
+}
+
+fn git_command_without_prompt() -> Command {
+    let mut command = Command::new("git");
+    command
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", "");
+    command
 }
 
 #[test]
@@ -104,6 +114,13 @@ fn hash_prints_embedded_head_commit() {
 
 #[test]
 fn check_prints_embedded_remote_and_result() {
+    if std::env::var_os(RUN_NETWORK_TESTS_ENV).is_none() {
+        eprintln!(
+            "{RUN_NETWORK_TESTS_ENV} is not set; skipping network-dependent check CLI test"
+        );
+        return;
+    }
+
     if !remote_main_is_reachable() {
         eprintln!("remote main branch not reachable via git ls-remote; skipping check CLI test");
         return;
