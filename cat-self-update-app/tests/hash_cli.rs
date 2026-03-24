@@ -11,6 +11,21 @@ fn workspace_root() -> std::path::PathBuf {
         .to_path_buf()
 }
 
+fn remote_main_is_reachable() -> bool {
+    let output = Command::new("git")
+        .args([
+            "ls-remote",
+            "https://github.com/cat2151/cat-self-update",
+            "refs/heads/main",
+        ])
+        .output();
+
+    match output {
+        Ok(output) => output.status.success(),
+        Err(_) => false,
+    }
+}
+
 #[test]
 fn help_lists_hash_subcommand() {
     let output = Command::new(app_bin())
@@ -85,4 +100,24 @@ fn hash_prints_embedded_head_commit() {
 
     let expected_hash = String::from_utf8(expected.stdout).expect("git hash should be utf-8");
     assert_eq!(actual_hash, expected_hash.trim());
+}
+
+#[test]
+fn check_prints_embedded_remote_and_result() {
+    if !remote_main_is_reachable() {
+        eprintln!("remote main branch not reachable via git ls-remote; skipping check CLI test");
+        return;
+    }
+
+    let output = Command::new(app_bin())
+        .arg("check")
+        .output()
+        .expect("check command should run");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("check output should be utf-8");
+    assert!(stdout.contains("embedded: "));
+    assert!(stdout.contains("remote: "));
+    assert!(stdout.contains("result: "));
 }
