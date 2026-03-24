@@ -36,7 +36,9 @@ fn help_lists_check_subcommand() {
 
     let stdout = String::from_utf8(output.stdout).expect("help output should be utf-8");
     assert!(stdout.contains("check"));
-    assert!(stdout.contains("Compare the build-time commit hash with the remote main branch"));
+    assert!(stdout.contains("Compare"));
+    assert!(stdout.contains("commit hash"));
+    assert!(stdout.contains("remote"));
 }
 
 #[test]

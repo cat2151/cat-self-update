@@ -178,7 +178,11 @@ fn parse_ls_remote_hash(output: &str, ref_name: &str) -> Option<String> {
             return None;
         }
 
-        parts.next().is_none().then(|| hash.to_string())
+        if parts.next().is_some() {
+            return None;
+        }
+
+        Some(hash.to_string())
     })
 }
 
