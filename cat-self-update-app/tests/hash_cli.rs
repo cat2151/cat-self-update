@@ -4,6 +4,13 @@ fn app_bin() -> String {
     std::env::var("CARGO_BIN_EXE_cat-self-update").expect("binary path should be set by cargo test")
 }
 
+fn workspace_root() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("app crate should live under the workspace root")
+        .to_path_buf()
+}
+
 #[test]
 fn help_lists_hash_subcommand() {
     let output = Command::new(app_bin())
@@ -34,7 +41,7 @@ fn hash_prints_embedded_head_commit() {
 
     let expected = Command::new("git")
         .args(["rev-parse", "HEAD"])
-        .current_dir("/home/runner/work/cat-self-update/cat-self-update")
+        .current_dir(workspace_root())
         .output()
         .expect("git rev-parse should run");
     assert!(expected.status.success());

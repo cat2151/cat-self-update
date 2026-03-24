@@ -14,17 +14,33 @@ fn main() {
         .output()
     {
         if output.status.success() {
-            let git_dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !git_dir.is_empty() {
-                println!("cargo:rerun-if-changed={git_dir}/HEAD");
+            let git_dir = std::path::PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+            if let Ok(git_dir) = git_dir.canonicalize() {
+                let head_path = git_dir.join("HEAD");
+                println!("cargo:rerun-if-changed={}", head_path.display());
 
-                if let Ok(head) = std::fs::read_to_string(format!("{git_dir}/HEAD")) {
+                if let Ok(head) = std::fs::read_to_string(&head_path) {
                     if let Some(ref_path) = head.trim().strip_prefix("ref: ") {
-                        println!("cargo:rerun-if-changed={git_dir}/{ref_path}");
+                        let ref_path = std::path::Path::new(ref_path);
+                        if !ref_path.as_os_str().is_empty()
+                            && ref_path.components().all(|component| {
+                                matches!(component, std::path::Component::Normal(_))
+                            })
+                        {
+                            let ref_watch_path = git_dir.join(ref_path);
+                            if let Ok(ref_watch_path) = ref_watch_path.canonicalize() {
+                                if ref_watch_path.starts_with(&git_dir) {
+                                    println!("cargo:rerun-if-changed={}", ref_watch_path.display());
+                                }
+                            }
+                        }
                     }
                 }
 
-                println!("cargo:rerun-if-changed={git_dir}/packed-refs");
+                println!(
+                    "cargo:rerun-if-changed={}",
+                    git_dir.join("packed-refs").display()
+                );
             }
         }
     }
