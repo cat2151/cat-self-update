@@ -26,6 +26,20 @@ fn help_lists_hash_subcommand() {
 }
 
 #[test]
+fn help_lists_check_subcommand() {
+    let output = Command::new(app_bin())
+        .arg("--help")
+        .output()
+        .expect("help command should run");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("help output should be utf-8");
+    assert!(stdout.contains("check"));
+    assert!(stdout.contains("Compare the build-time commit hash with the remote main branch"));
+}
+
+#[test]
 fn hash_prints_embedded_head_commit() {
     let output = Command::new(app_bin())
         .arg("hash")

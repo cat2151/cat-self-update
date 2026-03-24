@@ -1,4 +1,4 @@
-use cat_self_update_lib::self_update;
+use cat_self_update_lib::{check_remote_commit, self_update};
 use clap::{Parser, Subcommand};
 
 const BUILD_COMMIT_HASH: &str = env!("BUILD_COMMIT_HASH");
@@ -17,6 +17,8 @@ enum Commands {
     Update,
     /// Print the build-time commit hash
     Hash,
+    /// Compare the build-time commit hash with the remote main branch
+    Check,
 }
 
 fn main() {
@@ -30,5 +32,17 @@ fn main() {
             }
         }
         Commands::Hash => println!("{}", BUILD_COMMIT_HASH),
+        Commands::Check => match check_remote_commit(
+            "cat2151",
+            "cat-self-update",
+            "main",
+            BUILD_COMMIT_HASH,
+        ) {
+            Ok(result) => println!("{result}"),
+            Err(e) => {
+                eprintln!("Check failed: {}", e);
+                std::process::exit(1);
+            }
+        },
     }
 }

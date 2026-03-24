@@ -1,10 +1,56 @@
 use std::fs;
+use std::fmt;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(windows)]
 use std::process::Stdio;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckResult {
+    pub embedded_hash: String,
+    pub remote_hash: String,
+}
+
+impl CheckResult {
+    pub fn is_up_to_date(&self) -> bool {
+        self.embedded_hash == self.remote_hash
+    }
+}
+
+impl fmt::Display for CheckResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let result = if self.is_up_to_date() {
+            "up-to-date"
+        } else {
+            "update available"
+        };
+
+        write!(
+            f,
+            "embedded: {}\nremote: {}\nresult: {}",
+            self.embedded_hash, self.remote_hash, result
+        )
+    }
+}
+
+pub fn compare_hashes(embedded_hash: &str, remote_hash: &str) -> CheckResult {
+    CheckResult {
+        embedded_hash: embedded_hash.to_string(),
+        remote_hash: remote_hash.to_string(),
+    }
+}
+
+pub fn check_remote_commit(
+    owner: &str,
+    repo: &str,
+    branch: &str,
+    embedded_hash: &str,
+) -> Result<CheckResult, Box<dyn std::error::Error>> {
+    let remote_hash = fetch_remote_branch_head(owner, repo, branch)?;
+    Ok(compare_hashes(embedded_hash, &remote_hash))
+}
 
 /// Initiates a self-update by generating a Python helper script in the system
 /// temp directory and launching it asynchronously (detached from the current
@@ -95,6 +141,41 @@ except OSError:
         install_parts = install_parts,
         launch_stmts = launch_stmts,
     )
+}
+
+fn fetch_remote_branch_head(
+    owner: &str,
+    repo: &str,
+    branch: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let repo_url = format!("https://github.com/{owner}/{repo}");
+    let ref_name = format!("refs/heads/{branch}");
+    let output = Command::new("git")
+        .args(["ls-remote", repo_url.as_str(), ref_name.as_str()])
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let message = if stderr.is_empty() {
+            format!("git ls-remote failed with status {}", output.status)
+        } else {
+            format!("git ls-remote failed: {stderr}")
+        };
+        return Err(message.into());
+    }
+
+    let stdout = String::from_utf8(output.stdout)?;
+    parse_ls_remote_hash(&stdout, &ref_name)
+        .ok_or_else(|| format!("could not find remote hash for {ref_name}").into())
+}
+
+fn parse_ls_remote_hash(output: &str, ref_name: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        let mut parts = line.split_whitespace();
+        let hash = parts.next()?;
+        let name = parts.next()?;
+        (name == ref_name && parts.next().is_none()).then(|| hash.to_string())
+    })
 }
 
 /// Return a path inside the system temp directory that is unique for this
@@ -204,5 +285,37 @@ mod tests {
         let name = path.file_name().unwrap().to_str().unwrap();
         assert!(name.starts_with("cat_self_update_"));
         assert!(name.ends_with(".py"));
+    }
+
+    #[test]
+    fn compare_hashes_reports_up_to_date() {
+        let result = compare_hashes("abc", "abc");
+        assert!(result.is_up_to_date());
+        assert_eq!(result.to_string(), "embedded: abc\nremote: abc\nresult: up-to-date");
+    }
+
+    #[test]
+    fn compare_hashes_reports_update_available() {
+        let result = compare_hashes("abc", "def");
+        assert!(!result.is_up_to_date());
+        assert_eq!(
+            result.to_string(),
+            "embedded: abc\nremote: def\nresult: update available"
+        );
+    }
+
+    #[test]
+    fn parse_ls_remote_hash_finds_matching_branch() {
+        let output = "abc123\trefs/heads/main\ndef456\trefs/heads/feature\n";
+        assert_eq!(
+            parse_ls_remote_hash(output, "refs/heads/main"),
+            Some("abc123".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_ls_remote_hash_returns_none_for_missing_branch() {
+        let output = "abc123\trefs/heads/main\n";
+        assert_eq!(parse_ls_remote_hash(output, "refs/heads/release"), None);
     }
 }
