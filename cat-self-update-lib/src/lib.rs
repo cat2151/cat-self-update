@@ -164,7 +164,8 @@ fn fetch_remote_branch_head(
         return Err(message.into());
     }
 
-    let stdout = String::from_utf8(output.stdout)?;
+    let stdout = String::from_utf8(output.stdout)
+        .map_err(|_| "git ls-remote returned invalid UTF-8 output")?;
     parse_ls_remote_hash(&stdout, &ref_name)
         .ok_or_else(|| format!("could not find remote hash for {ref_name}").into())
 }
@@ -325,5 +326,11 @@ mod tests {
     fn parse_ls_remote_hash_returns_none_for_missing_branch() {
         let output = "abc123\trefs/heads/main\n";
         assert_eq!(parse_ls_remote_hash(output, "refs/heads/release"), None);
+    }
+
+    #[test]
+    fn parse_ls_remote_hash_rejects_extra_fields() {
+        let output = "abc123\trefs/heads/main\textra\n";
+        assert_eq!(parse_ls_remote_hash(output, "refs/heads/main"), None);
     }
 }
