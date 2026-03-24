@@ -165,7 +165,7 @@ fn fetch_remote_branch_head(
     }
 
     let stdout = String::from_utf8(output.stdout)
-        .map_err(|_| "git ls-remote returned invalid UTF-8 output")?;
+        .map_err(|err| format!("git ls-remote returned invalid UTF-8 output: {err}"))?;
     parse_ls_remote_hash(&stdout, &ref_name)
         .ok_or_else(|| format!("could not find remote hash for {ref_name}").into())
 }
