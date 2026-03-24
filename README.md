@@ -31,6 +31,7 @@ cargo install --force --git https://github.com/cat2151/cat-self-update
 
 ```
 cat-self-update update
+cat-self-update check
 ```
 
 ※Pythonがない場合は正常に動作しません
