@@ -174,7 +174,11 @@ fn parse_ls_remote_hash(output: &str, ref_name: &str) -> Option<String> {
         let mut parts = line.split_whitespace();
         let hash = parts.next()?;
         let name = parts.next()?;
-        (name == ref_name && parts.next().is_none()).then(|| hash.to_string())
+        if name != ref_name {
+            return None;
+        }
+
+        parts.next().is_none().then(|| hash.to_string())
     })
 }
 

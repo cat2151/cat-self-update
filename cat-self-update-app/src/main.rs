@@ -2,6 +2,9 @@ use cat_self_update_lib::{check_remote_commit, self_update};
 use clap::{Parser, Subcommand};
 
 const BUILD_COMMIT_HASH: &str = env!("BUILD_COMMIT_HASH");
+const REPO_OWNER: &str = "cat2151";
+const REPO_NAME: &str = "cat-self-update";
+const MAIN_BRANCH: &str = "main";
 
 #[derive(Parser)]
 #[command(name = "cat-self-update")]
@@ -26,18 +29,13 @@ fn main() {
 
     match cli.command {
         Commands::Update => {
-            if let Err(e) = self_update("cat2151", "cat-self-update", &[]) {
+            if let Err(e) = self_update(REPO_OWNER, REPO_NAME, &[]) {
                 eprintln!("Update failed: {}", e);
                 std::process::exit(1);
             }
         }
         Commands::Hash => println!("{}", BUILD_COMMIT_HASH),
-        Commands::Check => match check_remote_commit(
-            "cat2151",
-            "cat-self-update",
-            "main",
-            BUILD_COMMIT_HASH,
-        ) {
+        Commands::Check => match check_remote_commit(REPO_OWNER, REPO_NAME, MAIN_BRANCH, BUILD_COMMIT_HASH) {
             Ok(result) => println!("{result}"),
             Err(e) => {
                 eprintln!("Check failed: {}", e);
