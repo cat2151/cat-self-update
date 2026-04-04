@@ -1,11 +1,8 @@
-use std::fs;
 use std::fmt;
+use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-#[cfg(windows)]
-use std::process::Stdio;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckResult {
@@ -53,8 +50,7 @@ pub fn check_remote_commit(
 }
 
 /// Initiates a self-update by generating a Python helper script in the system
-/// temp directory and launching it asynchronously (detached from the current
-/// process).
+/// temp directory and launching it asynchronously in a separate process.
 ///
 /// # Arguments
 /// * `owner` – GitHub repository owner (e.g. `"cat2151"`)
@@ -66,7 +62,7 @@ pub fn self_update(
     repo: &str,
     bins: &[&str],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let py_content = generate_py_script(owner, repo, bins);
+    let py_content = generate_py_script(owner, repo, bins, std::process::id());
     let py_path = unique_tmp_path();
 
     fs::write(&py_path, &py_content)?;
@@ -91,7 +87,7 @@ fn escape_py_single_quoted(input: &str) -> String {
 }
 
 /// Build the Python script that will be written to a temp file.
-fn generate_py_script(owner: &str, repo: &str, bins: &[&str]) -> String {
+fn generate_py_script(owner: &str, repo: &str, bins: &[&str], parent_pid: u32) -> String {
     let repo_url = format!("https://github.com/{}/{}", owner, repo);
     let repo_url_escaped = escape_py_single_quoted(&repo_url);
 
@@ -104,12 +100,12 @@ fn generate_py_script(owner: &str, repo: &str, bins: &[&str]) -> String {
     // Determine which binary (or binaries) to launch after install.
     let launch_stmts: String = if bins.is_empty() {
         let repo_escaped = escape_py_single_quoted(repo);
-        format!("subprocess.Popen(['{}'], **popen_kwargs)\n", repo_escaped)
+        format!("launch(['{}'])\n", repo_escaped)
     } else {
         bins.iter()
             .map(|b| {
                 let b_escaped = escape_py_single_quoted(b);
-                format!("subprocess.Popen(['{}'], **popen_kwargs)\n", b_escaped)
+                format!("launch(['{}'])\n", b_escaped)
             })
             .collect()
     };
@@ -117,27 +113,77 @@ fn generate_py_script(owner: &str, repo: &str, bins: &[&str]) -> String {
     format!(
         r#"import subprocess
 import os
+import shlex
 import sys
+import traceback
 
-if sys.platform == 'win32':
-    DETACHED_PROCESS = 0x00000008
-    popen_kwargs = {{
-        'creationflags': DETACHED_PROCESS,
-        'stdin': subprocess.DEVNULL,
-        'stdout': subprocess.DEVNULL,
-        'stderr': subprocess.DEVNULL,
-    }}
-else:
-    popen_kwargs = {{}}
+PARENT_PID = {parent_pid}
+INSTALL_PARTS = {install_parts}
 
-subprocess.run({install_parts}, check=True, **popen_kwargs)
+def log(message):
+    print(message, flush=True)
 
-{launch_stmts}
+def format_command(parts):
+    if sys.platform == 'win32':
+        return subprocess.list2cmdline(parts)
+    return shlex.join(parts)
+
+def wait_for_parent_exit():
+    if sys.platform != 'win32':
+        return
+
+    import ctypes
+
+    SYNCHRONIZE = 0x00100000
+    INFINITE = 0xFFFFFFFF
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(SYNCHRONIZE, False, PARENT_PID)
+    if not handle:
+        return
+
+    try:
+        kernel32.WaitForSingleObject(handle, INFINITE)
+    finally:
+        kernel32.CloseHandle(handle)
+
+def launch(parts):
+    log(f"起動しています: {{format_command(parts)}}")
+    subprocess.Popen(parts)
+
+def wait_for_user_acknowledgement():
+    if sys.platform != 'win32':
+        return
+
+    log("Enterキーを押すと閉じます")
+    try:
+        input()
+    except EOFError:
+        pass
+
 try:
-    os.remove(__file__)
-except OSError:
-    pass
+    log("現在のプロセスの終了を待っています")
+    wait_for_parent_exit()
+    log("cargo installを起動しています")
+    log(f"$ {{format_command(INSTALL_PARTS)}}")
+    subprocess.run(INSTALL_PARTS, check=True)
+    log("cargo install が完了しました")
+{launch_stmts}
+except subprocess.CalledProcessError as err:
+    log(f"更新に失敗しました。終了コード: {{err.returncode}}")
+    wait_for_user_acknowledgement()
+    sys.exit(err.returncode)
+except Exception as err:
+    log(f"更新処理に失敗しました: {{err}}")
+    traceback.print_exc()
+    wait_for_user_acknowledgement()
+    sys.exit(1)
+finally:
+    try:
+        os.remove(__file__)
+    except OSError:
+        pass
 "#,
+        parent_pid = parent_pid,
         install_parts = install_parts,
         launch_stmts = launch_stmts,
     )
@@ -208,19 +254,16 @@ fn unique_tmp_path() -> PathBuf {
 }
 
 /// Spawn the Python interpreter with the given script path.
-/// On Windows the process is started as DETACHED_PROCESS so it outlives the
-/// parent executable.
+/// On Windows the process is started in a new console so progress is visible
+/// while the parent executable exits and releases its file lock.
 fn spawn_python(py_path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
         Command::new("python")
             .arg(py_path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .creation_flags(DETACHED_PROCESS)
+            .creation_flags(CREATE_NEW_CONSOLE)
             .spawn()?;
     }
 
@@ -238,13 +281,13 @@ mod tests {
 
     #[test]
     fn py_script_contains_repo_url() {
-        let script = generate_py_script("cat2151", "cat-self-update", &[]);
+        let script = generate_py_script("cat2151", "cat-self-update", &[], 1234);
         assert!(script.contains("https://github.com/cat2151/cat-self-update"));
     }
 
     #[test]
     fn py_script_contains_cargo_install() {
-        let script = generate_py_script("cat2151", "cat-self-update", &[]);
+        let script = generate_py_script("cat2151", "cat-self-update", &[], 1234);
         assert!(script.contains("cargo"));
         assert!(script.contains("install"));
         assert!(script.contains("--force"));
@@ -252,38 +295,51 @@ mod tests {
     }
 
     #[test]
-    fn py_script_redirects_windows_stdio_to_devnull() {
-        let script = generate_py_script("cat2151", "cat-self-update", &[]);
-        assert!(script.contains("'stdin': subprocess.DEVNULL"));
-        assert!(script.contains("'stdout': subprocess.DEVNULL"));
-        assert!(script.contains("'stderr': subprocess.DEVNULL"));
-        assert!(script.contains("subprocess.run("));
-        assert!(script.contains("check=True, **popen_kwargs"));
+    fn py_script_logs_install_progress_and_command() {
+        let script = generate_py_script("cat2151", "cat-self-update", &[], 1234);
+        assert!(script.contains("cargo installを起動しています"));
+        assert!(script.contains("format_command(INSTALL_PARTS)"));
+        assert!(script.contains("subprocess.run(INSTALL_PARTS, check=True)"));
+    }
+
+    #[test]
+    fn py_script_waits_for_parent_exit_on_windows() {
+        let script = generate_py_script("cat2151", "cat-self-update", &[], 1234);
+        assert!(script.contains("PARENT_PID = 1234"));
+        assert!(script.contains("OpenProcess"));
+        assert!(script.contains("WaitForSingleObject"));
+    }
+
+    #[test]
+    fn py_script_does_not_hide_cargo_output() {
+        let script = generate_py_script("cat2151", "cat-self-update", &[], 1234);
+        assert!(!script.contains("subprocess.DEVNULL"));
+        assert!(!script.contains("creationflags"));
     }
 
     #[test]
     fn py_script_launches_repo_binary_when_bins_empty() {
-        let script = generate_py_script("cat2151", "cat-self-update", &[]);
+        let script = generate_py_script("cat2151", "cat-self-update", &[], 1234);
         assert!(script.contains("'cat-self-update'"));
     }
 
     #[test]
     fn py_script_launches_specified_bins() {
-        let script = generate_py_script("owner", "repo", &["my-bin", "other-bin"]);
+        let script = generate_py_script("owner", "repo", &["my-bin", "other-bin"], 1234);
         assert!(script.contains("'my-bin'"));
         assert!(script.contains("'other-bin'"));
     }
 
     #[test]
     fn py_script_removes_itself() {
-        let script = generate_py_script("cat2151", "cat-self-update", &[]);
+        let script = generate_py_script("cat2151", "cat-self-update", &[], 1234);
         assert!(script.contains("os.remove(__file__)"));
         assert!(script.contains("except OSError"));
     }
 
     #[test]
     fn py_script_escapes_single_quotes() {
-        let script = generate_py_script("o\\'wner", "re\\'po", &["bi\\'n"]);
+        let script = generate_py_script("o\\'wner", "re\\'po", &["bi\\'n"], 1234);
         assert!(!script.contains("o\\'wner") || script.contains("o\\\\'wner"));
         // Ensure the escape helper works directly
         assert_eq!(escape_py_single_quoted("a'b"), "a\\'b");
@@ -308,7 +364,10 @@ mod tests {
     fn compare_hashes_reports_up_to_date() {
         let result = compare_hashes("abc", "abc");
         assert!(result.is_up_to_date());
-        assert_eq!(result.to_string(), "embedded: abc\nremote: abc\nresult: up-to-date");
+        assert_eq!(
+            result.to_string(),
+            "embedded: abc\nremote: abc\nresult: up-to-date"
+        );
     }
 
     #[test]

@@ -1,0 +1,1 @@
+- cargoのformatとlinterを使うこと
