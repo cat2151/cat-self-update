@@ -35,12 +35,14 @@ fn main() {
             }
         }
         Commands::Hash => println!("{}", BUILD_COMMIT_HASH),
-        Commands::Check => match check_remote_commit(REPO_OWNER, REPO_NAME, MAIN_BRANCH, BUILD_COMMIT_HASH) {
-            Ok(result) => println!("{result}"),
-            Err(e) => {
-                eprintln!("Check failed: {}", e);
-                std::process::exit(1);
+        Commands::Check => {
+            match check_remote_commit(REPO_OWNER, REPO_NAME, MAIN_BRANCH, BUILD_COMMIT_HASH) {
+                Ok(result) => println!("{result}"),
+                Err(e) => {
+                    eprintln!("Check failed: {}", e);
+                    std::process::exit(1);
+                }
             }
-        },
+        }
     }
 }

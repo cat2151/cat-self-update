@@ -115,9 +115,7 @@ fn hash_prints_embedded_head_commit() {
 #[test]
 fn check_prints_embedded_remote_and_result() {
     if std::env::var_os(RUN_NETWORK_TESTS_ENV).is_none() {
-        eprintln!(
-            "{RUN_NETWORK_TESTS_ENV} is not set; skipping network-dependent check CLI test"
-        );
+        eprintln!("{RUN_NETWORK_TESTS_ENV} is not set; skipping network-dependent check CLI test");
         return;
     }
 
