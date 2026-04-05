@@ -100,12 +100,12 @@ fn generate_py_script(owner: &str, repo: &str, bins: &[&str], parent_pid: u32) -
     // Determine which binary (or binaries) to launch after install.
     let launch_stmts: String = if bins.is_empty() {
         let repo_escaped = escape_py_single_quoted(repo);
-        format!("launch(['{}'])\n", repo_escaped)
+        format!("    launch(['{}'])\n", repo_escaped)
     } else {
         bins.iter()
             .map(|b| {
                 let b_escaped = escape_py_single_quoted(b);
-                format!("launch(['{}'])\n", b_escaped)
+                format!("    launch(['{}'])\n", b_escaped)
             })
             .collect()
     };
@@ -279,6 +279,54 @@ fn spawn_python(py_path: &std::path::Path) -> Result<(), Box<dyn std::error::Err
 mod tests {
     use super::*;
 
+    fn assert_python_script_has_valid_syntax(script: &str) {
+        let script_path = unique_tmp_path();
+        fs::write(&script_path, script).expect("should write generated script to a temp file");
+
+        let compile_command =
+            "import pathlib, sys; compile(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'), sys.argv[1], 'exec')";
+        let python_candidates: &[(&str, &[&str])] = if cfg!(windows) {
+            &[("python", &[]), ("py", &["-3"])]
+        } else {
+            &[("python3", &[]), ("python", &[])]
+        };
+
+        let mut output = None;
+        for (program, args) in python_candidates {
+            match Command::new(program)
+                .args(*args)
+                .arg("-c")
+                .arg(compile_command)
+                .arg(&script_path)
+                .output()
+            {
+                Ok(candidate_output) => {
+                    output = Some((program, *args, candidate_output));
+                    break;
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(err) => panic!("failed to run {program}: {err}"),
+            }
+        }
+
+        let (program, args, output) = output
+            .unwrap_or_else(|| panic!("could not find a Python interpreter for syntax validation"));
+        let command = std::iter::once((*program).to_string())
+            .chain(args.iter().map(|arg| (*arg).to_string()))
+            .chain(["-c".to_string(), compile_command.to_string()])
+            .collect::<Vec<_>>()
+            .join(" ");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        fs::remove_file(&script_path).ok();
+
+        assert!(
+            output.status.success(),
+            "generated Python script has invalid syntax\ncommand: {command}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+
     #[test]
     fn py_script_contains_repo_url() {
         let script = generate_py_script("cat2151", "cat-self-update", &[], 1234);
@@ -320,14 +368,26 @@ mod tests {
     #[test]
     fn py_script_launches_repo_binary_when_bins_empty() {
         let script = generate_py_script("cat2151", "cat-self-update", &[], 1234);
-        assert!(script.contains("'cat-self-update'"));
+        assert!(script.contains("    launch(['cat-self-update'])"));
     }
 
     #[test]
     fn py_script_launches_specified_bins() {
         let script = generate_py_script("owner", "repo", &["my-bin", "other-bin"], 1234);
-        assert!(script.contains("'my-bin'"));
-        assert!(script.contains("'other-bin'"));
+        assert!(script.contains("    launch(['my-bin'])"));
+        assert!(script.contains("    launch(['other-bin'])"));
+    }
+
+    #[test]
+    fn py_script_has_valid_python_syntax_when_launching_repo_binary() {
+        let script = generate_py_script("cat2151", "cat-self-update", &[], 1234);
+        assert_python_script_has_valid_syntax(&script);
+    }
+
+    #[test]
+    fn py_script_has_valid_python_syntax_when_launching_multiple_bins() {
+        let script = generate_py_script("owner", "repo", &["my-bin", "other-bin"], 1234);
+        assert_python_script_has_valid_syntax(&script);
     }
 
     #[test]
