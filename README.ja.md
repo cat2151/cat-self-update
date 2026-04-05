@@ -14,8 +14,6 @@ Windows版Rust用セルフアップデートのリファレンス実装。
 
 ## 予定
 - 以下をライブラリクレートに実装予定です：
-  - hash
-  - check
   - auto-update
   - back-ground-check
   - force-update（back-ground-checkで更新検知時）
@@ -34,4 +32,12 @@ cat-self-update update
 cat-self-update check
 ```
 
-※Pythonがない場合は正常に動作しません
+## 注意
+
+Pythonがない場合は正常に動作しません
+
+## 運用
+
+- 理想：このライブラリのバグ修正があった場合、このライブラリを利用するアプリはそれを自動的に検知してcargo installできること
+- 分析：それを行うには、アプリ側において「このライブラリのためだけに支払うコスト」が大きく、見合わない
+- 現実：もし、このライブラリを利用した update サブコマンドそのものが落ちる場合は、cargo install を実行しなおす
