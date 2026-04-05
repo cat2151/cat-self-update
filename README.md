@@ -1,24 +1,25 @@
 # cat-self-update
 
-## Status
+## Context
+
 Currently dogfooding.
 
-## Purpose
-Reference implementation for self-updating Rust applications on Windows.
+## Usage
+
+Reference implementation of self-update for Windows Rust.
 
 ## Approach
-Prioritizing a simple implementation.
+
+Prioritizes simple implementation.
 
 ## Plans
-The following features are planned to be implemented in a library crate:
-  - hash
-  - check
+- The following features are planned to be implemented in the library crate:
   - auto-update
-  - background check
-  - force-update (when an update is detected by background check)
-  - notification upon application exit (when an update is detected by background check)
+  - background-check
+  - force-update (when an update is detected by background-check)
+  - Notice upon app termination (when an update is detected by background-check)
 
-## Install
+## install
 
 ```
 cargo install --force --git https://github.com/cat2151/cat-self-update
@@ -31,4 +32,12 @@ cat-self-update update
 cat-self-update check
 ```
 
-Note: It will not function correctly without Python.
+## Note
+
+Requires Python to function correctly.
+
+## Operational Notes
+
+- Ideal: If there's a bug fix for this library, apps using it should be able to automatically detect it and perform `cargo install`.
+- Analysis: However, to achieve this, the 'cost incurred solely for this library' on the app side would be substantial and disproportionate.
+- Reality: If the `update` subcommand itself, which utilizes this library, crashes, re-run `cargo install`.
