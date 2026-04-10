@@ -100,7 +100,12 @@ fn generate_py_script(owner: &str, repo: &str, bins: &[&str], parent_pid: u32) -
     } else {
         let bin_args = bins
             .iter()
-            .map(|bin| format!("'{}'", escape_py_single_quoted(bin)))
+            .flat_map(|bin| {
+                [
+                    "'--bin'".to_string(),
+                    format!("'{}'", escape_py_single_quoted(bin)),
+                ]
+            })
             .collect::<Vec<_>>()
             .join(", ");
         format!(
@@ -358,7 +363,7 @@ mod tests {
     fn py_script_installs_specified_bins() {
         let script = generate_py_script("owner", "repo", &["my-bin", "other-bin"], 1234);
         assert!(script.contains(
-            "INSTALL_PARTS = ['cargo', 'install', '--force', '--git', 'https://github.com/owner/repo', 'my-bin', 'other-bin']"
+            "INSTALL_PARTS = ['cargo', 'install', '--force', '--git', 'https://github.com/owner/repo', '--bin', 'my-bin', '--bin', 'other-bin']"
         ));
     }
 
