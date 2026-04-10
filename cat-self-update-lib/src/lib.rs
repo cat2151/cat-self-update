@@ -55,7 +55,7 @@ pub fn check_remote_commit(
 /// # Arguments
 /// * `owner` – GitHub repository owner (e.g. `"cat2151"`)
 /// * `repo`  – GitHub repository name (e.g. `"cat-self-update"`)
-/// * `bins`  – additional binary names to launch after installation; when
+/// * `bins`  – binary names to install and launch after installation; when
 ///   empty the repository name itself is used as the binary name
 pub fn self_update(
     owner: &str,
@@ -92,10 +92,22 @@ fn generate_py_script(owner: &str, repo: &str, bins: &[&str], parent_pid: u32) -
     let repo_url_escaped = escape_py_single_quoted(&repo_url);
 
     // Build the cargo install command as a Python list literal.
-    let install_parts = format!(
-        "['cargo', 'install', '--force', '--git', '{}']",
-        repo_url_escaped
-    );
+    let install_parts = if bins.is_empty() {
+        format!(
+            "['cargo', 'install', '--force', '--git', '{}']",
+            repo_url_escaped
+        )
+    } else {
+        let bin_args = bins
+            .iter()
+            .map(|bin| format!("'{}'", escape_py_single_quoted(bin)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "['cargo', 'install', '--force', '--git', '{}', {}]",
+            repo_url_escaped, bin_args
+        )
+    };
 
     // Determine which binary (or binaries) to launch after install.
     let launch_stmts: String = if bins.is_empty() {
@@ -340,6 +352,14 @@ mod tests {
         assert!(script.contains("install"));
         assert!(script.contains("--force"));
         assert!(script.contains("--git"));
+    }
+
+    #[test]
+    fn py_script_installs_specified_bins() {
+        let script = generate_py_script("owner", "repo", &["my-bin", "other-bin"], 1234);
+        assert!(script.contains(
+            "INSTALL_PARTS = ['cargo', 'install', '--force', '--git', 'https://github.com/owner/repo', 'my-bin', 'other-bin']"
+        ));
     }
 
     #[test]
