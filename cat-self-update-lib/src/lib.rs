@@ -55,15 +55,16 @@ pub fn check_remote_commit(
 /// # Arguments
 /// * `owner` – GitHub repository owner (e.g. `"cat2151"`)
 /// * `repo`  – GitHub repository name (e.g. `"cat-self-update"`)
-/// * `packages` – package names to pass to `cargo install`, then launch after
-///   installation. When empty, installation uses Cargo's default package
-///   selection and the repository name is used as the binary name to launch.
+/// * `crates` – crate names to pass to `cargo install`; those same names are
+///   then launched after installation. When empty, installation uses Cargo's
+///   default crate selection and the repository name is used as the binary
+///   name to launch.
 pub fn self_update(
     owner: &str,
     repo: &str,
-    packages: &[&str],
+    crates: &[&str],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let py_content = generate_py_script(owner, repo, packages, std::process::id());
+    let py_content = generate_py_script(owner, repo, crates, std::process::id());
     let py_path = unique_tmp_path();
 
     fs::write(&py_path, &py_content)?;
@@ -88,38 +89,38 @@ fn escape_py_single_quoted(input: &str) -> String {
 }
 
 /// Build the Python script that will be written to a temp file.
-fn generate_py_script(owner: &str, repo: &str, packages: &[&str], parent_pid: u32) -> String {
+fn generate_py_script(owner: &str, repo: &str, crates: &[&str], parent_pid: u32) -> String {
     let repo_url = format!("https://github.com/{}/{}", owner, repo);
     let repo_url_escaped = escape_py_single_quoted(&repo_url);
 
     // Build the cargo install command as a Python list literal.
-    let install_parts = if packages.is_empty() {
+    let install_parts = if crates.is_empty() {
         format!(
             "['cargo', 'install', '--force', '--git', '{}']",
             repo_url_escaped
         )
     } else {
-        let package_args = packages
+        let crate_args = crates
             .iter()
-            .map(|package| format!("'{}'", escape_py_single_quoted(package)))
+            .map(|krate| format!("'{}'", escape_py_single_quoted(krate)))
             .collect::<Vec<_>>()
             .join(", ");
         format!(
             "['cargo', 'install', '--force', '--git', '{}', {}]",
-            repo_url_escaped, package_args
+            repo_url_escaped, crate_args
         )
     };
 
     // Determine which binary (or binaries) to launch after install.
-    let launch_stmts: String = if packages.is_empty() {
+    let launch_stmts: String = if crates.is_empty() {
         let repo_escaped = escape_py_single_quoted(repo);
         format!("    launch(['{}'])\n", repo_escaped)
     } else {
-        packages
+        crates
             .iter()
-            .map(|package| {
-                let package_escaped = escape_py_single_quoted(package);
-                format!("    launch(['{}'])\n", package_escaped)
+            .map(|krate| {
+                let crate_escaped = escape_py_single_quoted(krate);
+                format!("    launch(['{}'])\n", crate_escaped)
             })
             .collect()
     };
@@ -357,7 +358,7 @@ mod tests {
     }
 
     #[test]
-    fn py_script_installs_specified_packages() {
+    fn py_script_installs_specified_crates() {
         let script = generate_py_script("owner", "repo", &["my-bin", "other-bin"], 1234);
         assert!(script.contains(
             "INSTALL_PARTS = ['cargo', 'install', '--force', '--git', 'https://github.com/owner/repo', 'my-bin', 'other-bin']"
@@ -388,13 +389,13 @@ mod tests {
     }
 
     #[test]
-    fn py_script_launches_repo_binary_when_packages_empty() {
+    fn py_script_launches_repo_binary_when_crates_empty() {
         let script = generate_py_script("cat2151", "cat-self-update", &[], 1234);
         assert!(script.contains("    launch(['cat-self-update'])"));
     }
 
     #[test]
-    fn py_script_launches_specified_packages() {
+    fn py_script_launches_specified_crates() {
         let script = generate_py_script("owner", "repo", &["my-bin", "other-bin"], 1234);
         assert!(script.contains("    launch(['my-bin'])"));
         assert!(script.contains("    launch(['other-bin'])"));
@@ -407,7 +408,7 @@ mod tests {
     }
 
     #[test]
-    fn py_script_has_valid_python_syntax_when_launching_multiple_packages() {
+    fn py_script_has_valid_python_syntax_when_launching_multiple_crates() {
         let script = generate_py_script("owner", "repo", &["my-bin", "other-bin"], 1234);
         assert_python_script_has_valid_syntax(&script);
     }
