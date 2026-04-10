@@ -55,14 +55,15 @@ pub fn check_remote_commit(
 /// # Arguments
 /// * `owner` – GitHub repository owner (e.g. `"cat2151"`)
 /// * `repo`  – GitHub repository name (e.g. `"cat-self-update"`)
-/// * `bins`  – binary names to install and launch after installation; when
-///   empty the repository name itself is used as the binary name
+/// * `packages` – package names to pass to `cargo install`, then launch after
+///   installation. When empty, installation uses Cargo's default package
+///   selection and the repository name is used as the binary name to launch.
 pub fn self_update(
     owner: &str,
     repo: &str,
-    bins: &[&str],
+    packages: &[&str],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let py_content = generate_py_script(owner, repo, bins, std::process::id());
+    let py_content = generate_py_script(owner, repo, packages, std::process::id());
     let py_path = unique_tmp_path();
 
     fs::write(&py_path, &py_content)?;
@@ -87,37 +88,38 @@ fn escape_py_single_quoted(input: &str) -> String {
 }
 
 /// Build the Python script that will be written to a temp file.
-fn generate_py_script(owner: &str, repo: &str, bins: &[&str], parent_pid: u32) -> String {
+fn generate_py_script(owner: &str, repo: &str, packages: &[&str], parent_pid: u32) -> String {
     let repo_url = format!("https://github.com/{}/{}", owner, repo);
     let repo_url_escaped = escape_py_single_quoted(&repo_url);
 
     // Build the cargo install command as a Python list literal.
-    let install_parts = if bins.is_empty() {
+    let install_parts = if packages.is_empty() {
         format!(
             "['cargo', 'install', '--force', '--git', '{}']",
             repo_url_escaped
         )
     } else {
-        let bin_args = bins
+        let package_args = packages
             .iter()
-            .map(|bin| format!("'{}'", escape_py_single_quoted(bin)))
+            .map(|package| format!("'{}'", escape_py_single_quoted(package)))
             .collect::<Vec<_>>()
             .join(", ");
         format!(
             "['cargo', 'install', '--force', '--git', '{}', {}]",
-            repo_url_escaped, bin_args
+            repo_url_escaped, package_args
         )
     };
 
     // Determine which binary (or binaries) to launch after install.
-    let launch_stmts: String = if bins.is_empty() {
+    let launch_stmts: String = if packages.is_empty() {
         let repo_escaped = escape_py_single_quoted(repo);
         format!("    launch(['{}'])\n", repo_escaped)
     } else {
-        bins.iter()
-            .map(|b| {
-                let b_escaped = escape_py_single_quoted(b);
-                format!("    launch(['{}'])\n", b_escaped)
+        packages
+            .iter()
+            .map(|package| {
+                let package_escaped = escape_py_single_quoted(package);
+                format!("    launch(['{}'])\n", package_escaped)
             })
             .collect()
     };
@@ -355,7 +357,7 @@ mod tests {
     }
 
     #[test]
-    fn py_script_installs_specified_bins() {
+    fn py_script_installs_specified_packages() {
         let script = generate_py_script("owner", "repo", &["my-bin", "other-bin"], 1234);
         assert!(script.contains(
             "INSTALL_PARTS = ['cargo', 'install', '--force', '--git', 'https://github.com/owner/repo', 'my-bin', 'other-bin']"
@@ -386,13 +388,13 @@ mod tests {
     }
 
     #[test]
-    fn py_script_launches_repo_binary_when_bins_empty() {
+    fn py_script_launches_repo_binary_when_packages_empty() {
         let script = generate_py_script("cat2151", "cat-self-update", &[], 1234);
         assert!(script.contains("    launch(['cat-self-update'])"));
     }
 
     #[test]
-    fn py_script_launches_specified_bins() {
+    fn py_script_launches_specified_packages() {
         let script = generate_py_script("owner", "repo", &["my-bin", "other-bin"], 1234);
         assert!(script.contains("    launch(['my-bin'])"));
         assert!(script.contains("    launch(['other-bin'])"));
@@ -405,7 +407,7 @@ mod tests {
     }
 
     #[test]
-    fn py_script_has_valid_python_syntax_when_launching_multiple_bins() {
+    fn py_script_has_valid_python_syntax_when_launching_multiple_packages() {
         let script = generate_py_script("owner", "repo", &["my-bin", "other-bin"], 1234);
         assert_python_script_has_valid_syntax(&script);
     }
