@@ -102,7 +102,7 @@ fn generate_py_script(owner: &str, repo: &str, crates: &[&str], parent_pid: u32)
     } else {
         let crate_args = crates
             .iter()
-            .map(|krate| format!("'{}'", escape_py_single_quoted(krate)))
+            .map(|crate_name| format!("'{}'", escape_py_single_quoted(crate_name)))
             .collect::<Vec<_>>()
             .join(", ");
         format!(
@@ -118,8 +118,8 @@ fn generate_py_script(owner: &str, repo: &str, crates: &[&str], parent_pid: u32)
     } else {
         crates
             .iter()
-            .map(|krate| {
-                let crate_escaped = escape_py_single_quoted(krate);
+            .map(|crate_name| {
+                let crate_escaped = escape_py_single_quoted(crate_name);
                 format!("    launch(['{}'])\n", crate_escaped)
             })
             .collect()
