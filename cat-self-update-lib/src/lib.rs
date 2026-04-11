@@ -55,10 +55,9 @@ pub fn check_remote_commit(
 /// # Arguments
 /// * `owner` – GitHub repository owner (e.g. `"cat2151"`)
 /// * `repo`  – GitHub repository name (e.g. `"cat-self-update"`)
-/// * `crates` – crate names to pass to `cargo install`; those same names are
-///   then launched after installation. When empty, installation uses Cargo's
-///   default crate selection and the repository name is used as the binary
-///   name to launch.
+/// * `crates` – crate names to pass to `cargo install`. When empty,
+///   installation uses Cargo's default crate selection. No binaries are
+///   launched after installation.
 pub fn self_update(
     owner: &str,
     repo: &str,
@@ -111,20 +110,6 @@ fn generate_py_script(owner: &str, repo: &str, crates: &[&str], parent_pid: u32)
         )
     };
 
-    // Determine which binary (or binaries) to launch after install.
-    let launch_stmts: String = if crates.is_empty() {
-        let repo_escaped = escape_py_single_quoted(repo);
-        format!("    launch(['{}'])\n", repo_escaped)
-    } else {
-        crates
-            .iter()
-            .map(|crate_name| {
-                let crate_escaped = escape_py_single_quoted(crate_name);
-                format!("    launch(['{}'])\n", crate_escaped)
-            })
-            .collect()
-    };
-
     format!(
         r#"import subprocess
 import os
@@ -161,10 +146,6 @@ def wait_for_parent_exit():
     finally:
         kernel32.CloseHandle(handle)
 
-def launch(parts):
-    log(f"起動しています: {{format_command(parts)}}")
-    subprocess.Popen(parts)
-
 def wait_for_user_acknowledgement():
     if sys.platform != 'win32':
         return
@@ -182,7 +163,6 @@ try:
     log(f"$ {{format_command(INSTALL_PARTS)}}")
     subprocess.run(INSTALL_PARTS, check=True)
     log("cargo install が完了しました")
-{launch_stmts}
 except subprocess.CalledProcessError as err:
     log(f"更新に失敗しました。終了コード: {{err.returncode}}")
     wait_for_user_acknowledgement()
@@ -200,7 +180,6 @@ finally:
 "#,
         parent_pid = parent_pid,
         install_parts = install_parts,
-        launch_stmts = launch_stmts,
     )
 }
 
@@ -389,26 +368,28 @@ mod tests {
     }
 
     #[test]
-    fn py_script_launches_repo_binary_when_crates_empty() {
+    fn py_script_does_not_launch_binaries_when_crates_empty() {
         let script = generate_py_script("cat2151", "cat-self-update", &[], 1234);
-        assert!(script.contains("    launch(['cat-self-update'])"));
+        assert!(!script.contains("def launch("));
+        assert!(!script.contains("    launch(["));
     }
 
     #[test]
-    fn py_script_launches_specified_crates() {
+    fn py_script_does_not_launch_specified_crates() {
         let script = generate_py_script("owner", "repo", &["my-bin", "other-bin"], 1234);
-        assert!(script.contains("    launch(['my-bin'])"));
-        assert!(script.contains("    launch(['other-bin'])"));
+        assert!(!script.contains("def launch("));
+        assert!(!script.contains("    launch(['my-bin'])"));
+        assert!(!script.contains("    launch(['other-bin'])"));
     }
 
     #[test]
-    fn py_script_has_valid_python_syntax_when_launching_repo_binary() {
+    fn py_script_has_valid_python_syntax_when_crates_empty() {
         let script = generate_py_script("cat2151", "cat-self-update", &[], 1234);
         assert_python_script_has_valid_syntax(&script);
     }
 
     #[test]
-    fn py_script_has_valid_python_syntax_when_launching_multiple_crates() {
+    fn py_script_has_valid_python_syntax_with_specified_crates() {
         let script = generate_py_script("owner", "repo", &["my-bin", "other-bin"], 1234);
         assert_python_script_has_valid_syntax(&script);
     }
